@@ -353,12 +353,16 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
                     bwRatioIsSet = TRUE;
                 }
 
-                //guint v3BW = (bwRatioIsSet && bwRatio >= 0.0f) ? (guint)(advertisedBW * bwRatio) : advertisedBW;
                 guint v3BW;
-                if (torflowrelay_getIsExit(relay))
-              		v3BW = relayMeanBW > relayFilteredBW ? relayMeanBW : relayFilteredBW;
-		else
-                        v3BW = advertisedBW;
+                if (torflowrelay_getIsExit(relay)) {
+                  if (torflowconfig_getWriteRawBandwidth(database->config))
+                    v3BW = relayMeanBW > relayFilteredBW ? relayMeanBW : relayFilteredBW;
+                  else
+                    v3BW = (bwRatioIsSet && bwRatio >= 0.0f) ? (guint)(advertisedBW * bwRatio) : advertisedBW;
+                }
+                else {
+                  v3BW = advertisedBW;
+                }
                         
 
                 info("Computing bandwidth for relay %s (%s), prev_bw=%u, ratioIsSet=%s, ratio=%f, v3bw=%u",

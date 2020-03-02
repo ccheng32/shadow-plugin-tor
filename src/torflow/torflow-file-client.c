@@ -398,7 +398,7 @@ beginsocks:
     }
 
     case TORFLOWSOCKSCLIENT_ERROR: {
-        /* this is an error */
+        /* this is an error or timeout */
         torfloweventmanager_deregister(client->manager, client->descriptor);
         close(client->descriptor);
         client->descriptor = 0;

@@ -15,6 +15,7 @@ struct _TorFlowConfig {
     guint numRelaysPerSlice;
     guint scanIntervalSeconds;
     gdouble maxRelayWeightFraction;
+    gboolean writeRawBandwidth;
 
     in_port_t torSocksPort;
     in_port_t torControlPort;
@@ -46,6 +47,14 @@ static gboolean _torflowconfig_parseV3BWInitFilePath(TorFlowConfig* config, gcha
         g_free(path);
         return FALSE;
     }
+}
+
+static gboolean _torflowconfig_parseWriteRawBandwidth(TorFlowConfig* config, gchar* value) {
+    g_assert(config && value);
+    if(!g_ascii_strcasecmp(value, "True")) config->writeRawBandwidth = TRUE;
+    else config->writeRawBandwidth = FALSE;
+
+    return TRUE;
 }
 
 static gboolean _torflowconfig_parseScanInterval(TorFlowConfig* config, gchar* value) {
@@ -245,6 +254,7 @@ TorFlowConfig* torflowconfig_new(gint argc, gchar* argv[]) {
     config->numProbesPerRelay = 5;
     config->numRelaysPerSlice = 50;
     config->numParallelProbes = 4;
+    config->writeRawBandwidth = FALSE;
     config->scanIntervalSeconds = 0;
     config->maxRelayWeightFraction = 0.05;
     config->logLevel = G_LOG_LEVEL_INFO;
@@ -265,6 +275,10 @@ TorFlowConfig* torflowconfig_new(gint argc, gchar* argv[]) {
             /* we have both key and value in key=value entry */
             if(!g_ascii_strcasecmp(key, "V3BWFilePath")) {
                 if(!_torflowconfig_parseV3BWInitFilePath(config, value)) {
+                    hasError = TRUE;
+                }
+            } else if(!g_ascii_strcasecmp(key, "WriteRawBandwidth")) {
+                if(!_torflowconfig_parseWriteRawBandwidth(config, value)) {
                     hasError = TRUE;
                 }
             } else if(!g_ascii_strcasecmp(key, "ScanIntervalSeconds")) {
@@ -411,6 +425,11 @@ guint torflowconfig_getScanIntervalSeconds(TorFlowConfig* config) {
 }
 
 guint torflowconfig_getNumParallelProbes(TorFlowConfig* config) {
+    g_assert(config);
+    return config->numParallelProbes;
+}
+
+gboolean torflowconfig_getWriteRawBandwidth(TorFlowConfig* config) {
     g_assert(config);
     return config->numParallelProbes;
 }

@@ -27,6 +27,7 @@ in_port_t torflowconfig_getTorControlPort(TorFlowConfig* config);
 in_port_t torflowconfig_getListenerPort(TorFlowConfig* config);
 guint torflowconfig_getScanIntervalSeconds(TorFlowConfig* config);
 guint torflowconfig_getNumParallelProbes(TorFlowConfig* config);
+gboolean torflowconfig_getWriteRawBandwidth(TorFlowConfig* config);
 guint torflowconfig_getNumRelaysPerSlice(TorFlowConfig* config);
 gdouble torflowconfig_getMaxRelayWeightFraction(TorFlowConfig* config);
 guint torflowconfig_getProbeTimeoutSeconds(TorFlowConfig* config);
