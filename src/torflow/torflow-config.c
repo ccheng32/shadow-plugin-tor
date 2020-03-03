@@ -431,7 +431,7 @@ guint torflowconfig_getNumParallelProbes(TorFlowConfig* config) {
 
 gboolean torflowconfig_getWriteRawBandwidth(TorFlowConfig* config) {
     g_assert(config);
-    return config->numParallelProbes;
+    return config->writeRawBandwidth;
 }
 
 guint torflowconfig_getNumRelaysPerSlice(TorFlowConfig* config) {
