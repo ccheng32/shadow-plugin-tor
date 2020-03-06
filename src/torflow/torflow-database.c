@@ -304,7 +304,7 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
     g_hash_table_iter_init(&iter, database->relaysByIdentity);
     while(g_hash_table_iter_next(&iter, &key, &value)) {
         TorFlowRelay* relay = value;
-        if(relay && torflowrelay_isMeasureable(relay)) {
+        if(relay && torflowrelay_isMeasureable(relay) && torflowrelay_getIsExit(relay)) {
             guint relayMeanBW = 0, relayFilteredBW = 0;
             torflowrelay_getBandwidths(relay, numProbesPerRelay, &relayMeanBW, &relayFilteredBW);
 
