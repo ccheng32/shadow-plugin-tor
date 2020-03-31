@@ -289,6 +289,7 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
     // loop through measured nodes and aggregate stats
     guint totalMeanBW = 0;
     guint totalFilteredBW = 0;
+    guint totalAdvertisedBW = 0;
     guint numMeasuredNodes = 0;
 
     // we compute averages of the entire network so that we can compare each relay's bandwidth values
@@ -308,6 +309,7 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
             guint relayMeanBW = 0, relayFilteredBW = 0;
             torflowrelay_getBandwidths(relay, numProbesPerRelay, &relayMeanBW, &relayFilteredBW);
 
+            totalAdvertisedBW += torflowrelay_getAdvertisedBandwidth(relay);
             totalMeanBW += relayMeanBW;
             totalFilteredBW += relayFilteredBW;
             numMeasuredNodes++;
@@ -325,7 +327,7 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
     info("database found: numMeasuredNodes=%u, totalMeanBW=%u, avgMeanBW=%f, totalFilteredBW=%u, avgFilteredBW=%f",
             numMeasuredNodes, totalMeanBW, avgMeanBW, totalFilteredBW, avgFilteredBW);
 
-    guint totalBW = 0;
+    guint totalBW = 0, totalExitBW = 0;
 
     // loop through nodes and calculate new bandwidths
     g_hash_table_iter_init(&iter, database->relaysByIdentity);
@@ -355,13 +357,13 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
 
                 guint v3BW;
                 if (torflowrelay_getIsExit(relay)) {
-                  if (torflowconfig_getWriteRawBandwidth(database->config))
-                    v3BW = relayMeanBW > relayFilteredBW ? relayMeanBW : relayFilteredBW;
-                  else
-                    v3BW = (bwRatioIsSet && bwRatio >= 0.0f) ? (guint)(advertisedBW * bwRatio) : advertisedBW;
-                }
-                else {
-                  v3BW = advertisedBW;
+                    if (torflowconfig_getWriteRawBandwidth(database->config))
+                        v3BW = relayMeanBW > relayFilteredBW ? relayMeanBW : relayFilteredBW;
+                    else
+                        v3BW = (bwRatioIsSet && bwRatio >= 0.0f) ? (guint)(advertisedBW * bwRatio) : advertisedBW;
+                    totalExitBW += v3BW;
+                } else {
+                    v3BW = advertisedBW;
                 }
                         
 
@@ -375,6 +377,18 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
                 info("relay %s (%s) is not measurable, using 0 as v3bw value",
                         torflowrelay_getNickname(relay), torflowrelay_getIdentity(relay));
                 torflowrelay_setV3Bandwidth(relay, 0);
+            }
+        }
+    }
+
+    // For default Torflow, loop through the exit nodes and scale bandwidths such that the sum is consistent.
+    if (!torflowconfig_getWriteRawBandwidth(database->config)) {
+        g_hash_table_iter_init(&iter, database->relaysByIdentity);
+        while(g_hash_table_iter_next(&iter, &key, &value)) {
+            TorFlowRelay* relay = value;
+            if (torflowrelay_getIsExit(relay)) {
+                guint oldV3BW = torflowrelay_getV3Bandwidth(relay);
+                torflowrelay_setV3Bandwidth(relay, oldV3BW * totalAdvertisedBW / totalExitBW);
             }
         }
     }
