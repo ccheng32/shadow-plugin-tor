@@ -14,7 +14,7 @@ typedef struct _TorFlowSlice TorFlowSlice;
 TorFlowSlice* torflowslice_new(guint sliceID, gdouble percentile, guint numProbesPerRelay);
 void torflowslice_free(TorFlowSlice* slice);
 
-void torflowslice_addRelay(TorFlowSlice* slice, TorFlowRelay* relay);
+void torflowslice_addRelay(TorFlowSlice* slice, TorFlowRelay* relay, gboolean onlyMeasureExits);
 gboolean torflowslice_chooseRelayPair(TorFlowSlice* slice, gchar** entryRelayIdentity, gchar** exitRelayIdentity);
 
 void torflowslice_logStatus(TorFlowSlice* slice);

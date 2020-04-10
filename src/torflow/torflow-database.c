@@ -305,7 +305,10 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
     g_hash_table_iter_init(&iter, database->relaysByIdentity);
     while(g_hash_table_iter_next(&iter, &key, &value)) {
         TorFlowRelay* relay = value;
-        if(relay && torflowrelay_isMeasureable(relay) && torflowrelay_getIsExit(relay)) {
+        if ((!torflowrelay_getIsExit(relay) && torflowconfig_getOnlyMeasureExits(database->config)) || 
+             torflowrelay_getIsAuth(relay)) {
+          continue;
+        } else if(relay && torflowrelay_isMeasureable(relay)) {
             guint relayMeanBW = 0, relayFilteredBW = 0;
             torflowrelay_getBandwidths(relay, numProbesPerRelay, &relayMeanBW, &relayFilteredBW);
 
@@ -356,14 +359,15 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
                 }
 
                 guint v3BW;
-                if (torflowrelay_getIsExit(relay)) {
+                if((!torflowrelay_getIsExit(relay) && torflowconfig_getOnlyMeasureExits(database->config)) || 
+                    torflowrelay_getIsAuth(relay)) {
+                    v3BW = advertisedBW;
+                } else {
                     if (torflowconfig_getWriteRawBandwidth(database->config))
                         v3BW = relayMeanBW > relayFilteredBW ? relayMeanBW : relayFilteredBW;
                     else
                         v3BW = (bwRatioIsSet && bwRatio >= 0.0f) ? (guint)(advertisedBW * bwRatio) : advertisedBW;
                     totalExitBW += v3BW;
-                } else {
-                    v3BW = advertisedBW;
                 }
                         
 
@@ -388,7 +392,9 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
             TorFlowRelay* relay = value;
             if (torflowrelay_getIsExit(relay)) {
                 guint oldV3BW = torflowrelay_getV3Bandwidth(relay);
-                double newV3BW = (double) oldV3BW * totalAdvertisedBW / totalExitBW;
+                double newV3BW = torflowconfig_getOnlyMeasureExits(database->config) ?
+                                 (double) oldV3BW * totalAdvertisedBW / totalExitBW :
+                                 (double) oldV3BW * totalAdvertisedBW / totalBW;
                 torflowrelay_setV3Bandwidth(relay, (guint) newV3BW);
             }
         }

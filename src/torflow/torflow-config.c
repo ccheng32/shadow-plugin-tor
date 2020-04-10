@@ -16,6 +16,7 @@ struct _TorFlowConfig {
     guint scanIntervalSeconds;
     gdouble maxRelayWeightFraction;
     gboolean writeRawBandwidth;
+    gboolean onlyMeasureExits;
 
     in_port_t torSocksPort;
     in_port_t torControlPort;
@@ -53,6 +54,14 @@ static gboolean _torflowconfig_parseWriteRawBandwidth(TorFlowConfig* config, gch
     g_assert(config && value);
     if(!g_ascii_strcasecmp(value, "True")) config->writeRawBandwidth = TRUE;
     else config->writeRawBandwidth = FALSE;
+
+    return TRUE;
+}
+
+static gboolean _torflowconfig_parseOnlyMeasureExits(TorFlowConfig* config, gchar* value) {
+    g_assert(config && value);
+    if(!g_ascii_strcasecmp(value, "True")) config->onlyMeasureExits = TRUE;
+    else config->onlyMeasureExits = FALSE;
 
     return TRUE;
 }
@@ -255,6 +264,7 @@ TorFlowConfig* torflowconfig_new(gint argc, gchar* argv[]) {
     config->numRelaysPerSlice = 50;
     config->numParallelProbes = 4;
     config->writeRawBandwidth = FALSE;
+    config->onlyMeasureExits = FALSE;
     config->scanIntervalSeconds = 0;
     config->maxRelayWeightFraction = 0.05;
     config->logLevel = G_LOG_LEVEL_INFO;
@@ -279,6 +289,10 @@ TorFlowConfig* torflowconfig_new(gint argc, gchar* argv[]) {
                 }
             } else if(!g_ascii_strcasecmp(key, "WriteRawBandwidth")) {
                 if(!_torflowconfig_parseWriteRawBandwidth(config, value)) {
+                    hasError = TRUE;
+                }
+            } else if(!g_ascii_strcasecmp(key, "OnlyMeasureExits")) {
+                if(!_torflowconfig_parseOnlyMeasureExits(config, value)) {
                     hasError = TRUE;
                 }
             } else if(!g_ascii_strcasecmp(key, "ScanIntervalSeconds")) {
@@ -432,6 +446,11 @@ guint torflowconfig_getNumParallelProbes(TorFlowConfig* config) {
 gboolean torflowconfig_getWriteRawBandwidth(TorFlowConfig* config) {
     g_assert(config);
     return config->writeRawBandwidth;
+}
+
+gboolean torflowconfig_getOnlyMeasureExits(TorFlowConfig* config) {
+    g_assert(config);
+    return config->onlyMeasureExits;
 }
 
 guint torflowconfig_getNumRelaysPerSlice(TorFlowConfig* config) {

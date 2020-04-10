@@ -259,7 +259,7 @@ static GQueue* _torflowauthority_sliceRelays(TorFlowAuthority* authority) {
             g_queue_push_tail(slices, slice);
         }
 
-        torflowslice_addRelay(slice, g_queue_pop_head(relaysToMeasure));
+        torflowslice_addRelay(slice, g_queue_pop_head(relaysToMeasure), torflowconfig_getOnlyMeasureExits(authority->config));
 
         if(torflowslice_getLength(slice) >= torflowconfig_getNumRelaysPerSlice(authority->config)) {
             /* log slice info */

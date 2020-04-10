@@ -16,6 +16,7 @@ struct _TorFlowSlice {
 
     GHashTable* entries;
     GHashTable* exits;
+    GHashTable* auths;
 };
 
 static void _torflowslice_computeMinProbes(gchar* key, gpointer value, guint* minProbes) {
@@ -84,6 +85,7 @@ TorFlowSlice* torflowslice_new(guint sliceID, gdouble percentile, guint numProbe
     slice->numProbesPerRelay = numProbesPerRelay;
 
     slice->entries = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    slice->auths = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     slice->exits = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 
     return slice;
@@ -100,6 +102,10 @@ void torflowslice_free(TorFlowSlice* slice) {
         g_hash_table_destroy(slice->exits);
     }
 
+    if(slice->auths) {
+        g_hash_table_destroy(slice->auths);
+    }
+
     if(slice->relayIDSearch) {
         g_free(slice->relayIDSearch);
         slice->relayIDSearch = NULL;
@@ -108,16 +114,18 @@ void torflowslice_free(TorFlowSlice* slice) {
     g_free(slice);
 }
 
-void torflowslice_addRelay(TorFlowSlice* slice, TorFlowRelay* relay) {
+void torflowslice_addRelay(TorFlowSlice* slice, TorFlowRelay* relay, gboolean onlyMeasureExits) {
     g_assert(slice);
     g_assert(relay);
 
     gchar* relayID = g_strdup(torflowrelay_getIdentity(relay));
     guint numProbes = 0;
 
-    if(torflowrelay_getIsExit(relay)) {
+    if (torflowrelay_getIsAuth(relay)){
+        g_hash_table_replace(slice->auths, relayID, GUINT_TO_POINTER(numProbes));
+    } else if (torflowrelay_getIsExit(relay)) {
         g_hash_table_replace(slice->exits, relayID, GUINT_TO_POINTER(numProbes));
-    } else if (torflowrelay_getIsAuth(relay)){
+    } else if (!onlyMeasureExits) {
         g_hash_table_replace(slice->entries, relayID, GUINT_TO_POINTER(numProbes));
     }
 }
@@ -131,7 +139,7 @@ guint torflowslice_getNumProbesRemaining(TorFlowSlice* slice) {
     g_assert(slice);
 
     slice->totalProbesRemaining = 0;
-    //g_hash_table_foreach(slice->entries, (GHFunc)_torflowslice_countProbesRemaining, slice);
+    g_hash_table_foreach(slice->entries, (GHFunc)_torflowslice_countProbesRemaining, slice);
     g_hash_table_foreach(slice->exits, (GHFunc)_torflowslice_countProbesRemaining, slice);
 
     return slice->totalProbesRemaining;
@@ -180,6 +188,22 @@ gsize torflowslice_getTransferSize(TorFlowSlice* slice) {
     return transferSize;
 }
 
+static void _torflowslice_mergeTables(GHashTable* dest, GHashTable* one, GHashTable* two) {
+    g_assert(dest);
+    g_assert(one);
+    g_assert(two);
+
+    GHashTable* tables[2] = {one, two};
+    GHashTableIter iter;
+    gpointer key, value;
+    for (int i = 0; i < 2; i++) {
+        g_hash_table_iter_init(&iter, tables[i]);
+        while(g_hash_table_iter_next(&iter, &key, &value)) {
+            g_hash_table_replace(dest, key, value);
+        }
+    }
+}
+
 gboolean torflowslice_chooseRelayPair(TorFlowSlice* slice, gchar** entryRelayIdentity, gchar** exitRelayIdentity) {
     g_assert(slice);
 
@@ -189,75 +213,96 @@ gboolean torflowslice_chooseRelayPair(TorFlowSlice* slice, gchar** entryRelayIde
         return FALSE;
     }
 
+    GHashTable* targets = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    _torflowslice_mergeTables(targets, slice->entries, slice->exits);
+
     /* choose an entry and exit among entries and exits with the lowest measurement counts */
-    GQueue* candidateEntries = _torflowslice_getCandidates(slice, slice->entries);
-    GQueue* candidateExits = _torflowslice_getCandidates(slice, slice->exits);
-
-    /* make sure we have at least one entry and one exit */
-    if(g_queue_is_empty(candidateEntries) && g_queue_is_empty(candidateExits)) {
-        warning("slice %u: problem choosing relay pair: found %u candidates of %u entries and %u candidates of %u exits",
-                slice->sliceID,
-                g_queue_get_length(candidateEntries), g_hash_table_size(slice->entries),
-                g_queue_get_length(candidateExits), g_hash_table_size(slice->exits));
-
-        g_queue_free(candidateEntries);
-        g_queue_free(candidateExits);
-
-        return FALSE;
-    }
+    GQueue* candidateTargets = _torflowslice_getCandidates(slice, targets);
+    GQueue* candidateAuths = _torflowslice_getCandidates(slice, slice->auths);
 
     /* choose uniformly from all candidates */
-    guint entryPosition = _torflowslice_randomIndex(g_queue_get_length(candidateEntries));
-    guint exitPosition = _torflowslice_randomIndex(g_queue_get_length(candidateExits));
+    guint targetPosition = _torflowslice_randomIndex(g_queue_get_length(candidateTargets));
+    guint authPosition = _torflowslice_randomIndex(g_queue_get_length(candidateAuths));
 
-    gchar* entryID = g_queue_peek_nth(candidateEntries, entryPosition);
-    gchar* exitID = g_queue_peek_nth(candidateExits, exitPosition);
+    gchar* targetID = g_queue_peek_nth(candidateTargets, targetPosition);
+    gchar* authID = g_queue_peek_nth(candidateAuths, authPosition);
 
-    if(entryID == NULL || exitID == NULL) {
-        error("slice %u: we had candidate exits and entries, but found NULL ids: entry=%s exit=%s", slice->sliceID, entryID, exitID);
+    if(targetID == NULL || authID == NULL) {
+        error("slice %u: we had candidate exits and entries, but found NULL ids: target=%s auth=%s", slice->sliceID, targetID, authID);
 
-        g_queue_free(candidateEntries);
-        g_queue_free(candidateExits);
+        g_queue_free(candidateTargets);
+        g_queue_free(candidateAuths);
 
         return FALSE;
     }
 
     /* update the measurement count for the chosen relays */
-    gpointer entryProbeCount = g_hash_table_lookup(slice->entries, entryID);
-    gpointer exitProbeCount = g_hash_table_lookup(slice->exits, exitID);
+    gpointer entryProbeCount = g_hash_table_lookup(slice->entries, targetID);
+    gpointer exitProbeCount = g_hash_table_lookup(slice->exits, targetID);
+
+    if(entryProbeCount == NULL && authID == NULL) {
+        error("slice %u: we had candidate exits and entries, but found NULL ids: target=%s auth=%s", slice->sliceID, targetID, authID);
+
+        g_queue_free(candidateTargets);
+        g_queue_free(candidateAuths);
+
+        return FALSE;
+    }
+    
+    gboolean measureEntry = entryProbeCount != NULL ? TRUE : FALSE;
 
     /* steal the keys so we don't free them */
-    g_hash_table_steal(slice->entries, entryID);
-    g_hash_table_steal(slice->exits, exitID);
+    if (measureEntry) g_hash_table_steal(slice->entries, targetID);
+    else g_hash_table_steal(slice->exits, targetID);
 
     /* increment the measurement counts */
-    guint newEntryCount = GPOINTER_TO_UINT(entryProbeCount);
-    guint newExitCount = GPOINTER_TO_UINT(exitProbeCount);
-    newEntryCount++;
-    newExitCount++;
+    guint newTargetCount = measureEntry ? GPOINTER_TO_UINT(entryProbeCount) :
+                                          GPOINTER_TO_UINT(exitProbeCount);
+
+    newTargetCount++;
 
     /* store them in the table again */
-    g_hash_table_replace(slice->entries, entryID, GUINT_TO_POINTER(newEntryCount));
-    g_hash_table_replace(slice->exits, exitID, GUINT_TO_POINTER(newExitCount));
+    if (measureEntry) g_hash_table_replace(slice->entries, targetID, GUINT_TO_POINTER(newTargetCount));
+    else g_hash_table_replace(slice->exits, targetID, GUINT_TO_POINTER(newTargetCount));
 
-    info("slice %u: choosing relay pair: found %u candidates of %u entries and %u candidates of %u exits, "
-            "choosing entry %s at position %u and exit %s at position %u, "
-            "new entry probe count is %u and exit probe count is %u",
-            slice->sliceID,
-            g_queue_get_length(candidateEntries), g_hash_table_size(slice->entries),
-            g_queue_get_length(candidateExits), g_hash_table_size(slice->exits),
-            entryID, entryPosition, exitID, exitPosition, newEntryCount, newExitCount);
+    if (measureEntry) {
+        info("slice %u: choosing relay pair: found %u candidates of %u targets and %u candidates of %u auths, "
+                "choosing entry %s at position %u and auth %s at position %u, "
+                "new target probe count is %u",
+                slice->sliceID,
+                g_queue_get_length(candidateTargets), g_hash_table_size(targets),
+                g_queue_get_length(candidateAuths), g_hash_table_size(slice->auths),
+                targetID, targetPosition, authID, authPosition, newTargetCount); 
+    } else {
+        info("slice %u: choosing relay pair: found %u candidates of %u targets and %u candidates of %u auths, "
+                "choosing auth %s at position %u and exit %s at position %u, "
+                "new target probe count is %u",
+                slice->sliceID,
+                g_queue_get_length(candidateAuths), g_hash_table_size(slice->auths),
+                g_queue_get_length(candidateTargets), g_hash_table_size(targets),
+                authID, targetPosition, targetID, authPosition, newTargetCount); 
+    }
 
     /* cleanup the queues */
-    g_queue_free(candidateEntries);
-    g_queue_free(candidateExits);
+    g_queue_free(candidateTargets);
+    g_queue_free(candidateAuths);
+    g_hash_table_destroy(targets);
 
     /* return values */
-    if(entryRelayIdentity) {
-        *entryRelayIdentity = entryID;
-    }
-    if(exitRelayIdentity) {
-        *exitRelayIdentity = exitID;
+    if (measureEntry) {
+        if(entryRelayIdentity) {
+            *entryRelayIdentity = targetID;
+        }
+        if(exitRelayIdentity) {
+            *exitRelayIdentity = authID;
+        }
+    } else {
+        if(entryRelayIdentity) {
+            *entryRelayIdentity = authID;
+        }
+        if(exitRelayIdentity) {
+            *exitRelayIdentity = targetID;
+        }
     }
     return TRUE;
 }
