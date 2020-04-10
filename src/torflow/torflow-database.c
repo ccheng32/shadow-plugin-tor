@@ -388,7 +388,8 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
             TorFlowRelay* relay = value;
             if (torflowrelay_getIsExit(relay)) {
                 guint oldV3BW = torflowrelay_getV3Bandwidth(relay);
-                torflowrelay_setV3Bandwidth(relay, oldV3BW * totalAdvertisedBW / totalExitBW);
+                double newV3BW = (double) oldV3BW * totalAdvertisedBW / totalExitBW;
+                torflowrelay_setV3Bandwidth(relay, (guint) newV3BW);
             }
         }
     }
