@@ -227,6 +227,8 @@ gboolean torflowslice_chooseRelayPair(TorFlowSlice* slice, gchar** entryRelayIde
     gchar* targetID = g_queue_peek_nth(candidateTargets, targetPosition);
     gchar* authID = g_queue_peek_nth(candidateAuths, authPosition);
 
+    info("target %s, auth %s", targetID, authID);
+
     if(targetID == NULL || authID == NULL) {
         error("slice %u: we had candidate exits and entries, but found NULL ids: target=%s auth=%s", slice->sliceID, targetID, authID);
 
@@ -236,29 +238,15 @@ gboolean torflowslice_chooseRelayPair(TorFlowSlice* slice, gchar** entryRelayIde
         return FALSE;
     }
 
-    /* update the measurement count for the chosen relays */
-    gpointer entryProbeCount = g_hash_table_lookup(slice->entries, targetID);
-    gpointer exitProbeCount = g_hash_table_lookup(slice->exits, targetID);
-
-    if(entryProbeCount == NULL && authID == NULL) {
-        error("slice %u: we had candidate exits and entries, but found NULL ids: target=%s auth=%s", slice->sliceID, targetID, authID);
-
-        g_queue_free(candidateTargets);
-        g_queue_free(candidateAuths);
-
-        return FALSE;
-    }
-    
-    gboolean measureEntry = entryProbeCount != NULL ? TRUE : FALSE;
+    gboolean measureEntry = g_hash_table_contains(slice->entries, targetID);
 
     /* steal the keys so we don't free them */
     if (measureEntry) g_hash_table_steal(slice->entries, targetID);
     else g_hash_table_steal(slice->exits, targetID);
 
     /* increment the measurement counts */
-    guint newTargetCount = measureEntry ? GPOINTER_TO_UINT(entryProbeCount) :
-                                          GPOINTER_TO_UINT(exitProbeCount);
-
+    guint newTargetCount = measureEntry ? GPOINTER_TO_UINT(g_hash_table_lookup(slice->entries, targetID)) :
+                                          GPOINTER_TO_UINT(g_hash_table_lookup(slice->exits, targetID));
     newTargetCount++;
 
     /* store them in the table again */
@@ -278,14 +266,15 @@ gboolean torflowslice_chooseRelayPair(TorFlowSlice* slice, gchar** entryRelayIde
                 "choosing auth %s at position %u and exit %s at position %u, "
                 "new target probe count is %u",
                 slice->sliceID,
-                g_queue_get_length(candidateAuths), g_hash_table_size(slice->auths),
                 g_queue_get_length(candidateTargets), g_hash_table_size(targets),
-                authID, targetPosition, targetID, authPosition, newTargetCount); 
+                g_queue_get_length(candidateAuths), g_hash_table_size(slice->auths),
+                authID, authPosition, targetID, targetPosition, newTargetCount);
     }
 
     /* cleanup the queues */
     g_queue_free(candidateTargets);
     g_queue_free(candidateAuths);
+    g_hash_table_steal_all(targets);
     g_hash_table_destroy(targets);
 
     /* return values */
