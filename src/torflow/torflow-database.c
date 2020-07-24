@@ -289,8 +289,12 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
     // loop through measured nodes and aggregate stats
     guint totalMeanBW = 0;
     guint totalFilteredBW = 0;
+    guint totalMeanExitBW = 0;
+    guint totalFilteredExitBW = 0;
     guint totalAdvertisedBW = 0;
+    guint totalAdvertisedExitBW = 0;
     guint numMeasuredNodes = 0;
+    guint numMeasuredExitNodes = 0;
 
     // we compute averages of the entire network so that we can compare each relay's bandwidth values
     // to the rest of the network
@@ -316,6 +320,12 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
             totalMeanBW += relayMeanBW;
             totalFilteredBW += relayFilteredBW;
             numMeasuredNodes++;
+            if (torflowrelay_getIsExit(relay)) {
+                totalAdvertisedExitBW += torflowrelay_getAdvertisedBandwidth(relay);
+                totalMeanExitBW += relayMeanBW;
+                totalFilteredExitBW += relayFilteredBW;
+                numMeasuredExitNodes++;
+            }
         }
     }
 
@@ -323,8 +333,14 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
     gdouble avgMeanBW = 0.0f;
     gdouble avgFilteredBW = 0.0f;
     if(numMeasuredNodes > 0) {
-        avgMeanBW = ((gdouble)totalMeanBW)/((gdouble)numMeasuredNodes);
+        avgMeanBW = ((gdouble)totalMeanExitBW)/((gdouble)numMeasuredExitNodes);
         avgFilteredBW = ((gdouble)totalFilteredBW)/((gdouble)numMeasuredNodes);
+    }
+    gdouble avgMeanExitBW = 0.0f;
+    gdouble avgFilteredExitBW = 0.0f;
+    if(numMeasuredExitNodes > 0) {
+        avgMeanExitBW = ((gdouble)totalMeanBW)/((gdouble)numMeasuredNodes);
+        avgFilteredExitBW = ((gdouble)totalFilteredExitBW)/((gdouble)numMeasuredExitNodes);
     }
 
     info("database found: numMeasuredNodes=%u, totalMeanBW=%u, avgMeanBW=%f, totalFilteredBW=%u, avgFilteredBW=%f",
@@ -338,6 +354,7 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
         TorFlowRelay* relay = value;
 
         if(relay) {
+            gboolean isExit = torflowrelay_getIsExit(relay);
             if(torflowrelay_isMeasureable(relay)) {
                 guint relayMeanBW = 0, relayFilteredBW = 0;
                 torflowrelay_getBandwidths(relay, numProbesPerRelay, &relayMeanBW, &relayFilteredBW);
@@ -348,18 +365,21 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
                 gboolean bwRatioIsSet = FALSE;
 
                 if(avgMeanBW > 0 && avgFilteredBW > 0) {
-                    bwRatio = fmax(((gdouble)relayMeanBW)/avgMeanBW, ((gdouble)relayFilteredBW)/avgFilteredBW);
+                    bwRatio = isExit ? fmax(((gdouble)relayMeanBW)/avgMeanExitBW, ((gdouble)relayFilteredBW)/avgFilteredExitBW):
+                                       fmax(((gdouble)relayMeanBW)/(avgMeanBW-avgMeanExitBW), ((gdouble)relayFilteredBW)/(avgFilteredBW-avgFilteredExitBW));
                     bwRatioIsSet = TRUE;
                 } else if(avgMeanBW > 0) {
-                    bwRatio = ((gdouble)relayMeanBW)/avgMeanBW;
+                    bwRatio = isExit ? ((gdouble)relayMeanBW)/avgMeanExitBW:
+                                       ((gdouble)relayMeanBW)/(avgMeanBW-avgMeanExitBW);
                     bwRatioIsSet = TRUE;
                 } else if(avgFilteredBW > 0) {
-                    bwRatio = ((gdouble)relayFilteredBW)/avgFilteredBW;
+                    bwRatio = isExit ? ((gdouble)relayFilteredBW)/avgFilteredExitBW:
+                                       ((gdouble)relayFilteredBW)/(avgFilteredBW-avgFilteredExitBW);
                     bwRatioIsSet = TRUE;
                 }
 
                 guint v3BW;
-                if((!torflowrelay_getIsExit(relay) && torflowconfig_getOnlyMeasureExits(database->config)) || 
+                if((!isExit && torflowconfig_getOnlyMeasureExits(database->config)) || 
                     torflowrelay_getIsAuth(relay)) {
                     v3BW = advertisedBW;
                 } else {
@@ -367,7 +387,7 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
                         v3BW = relayMeanBW > relayFilteredBW ? relayMeanBW : relayFilteredBW;
                     else
                         v3BW = (bwRatioIsSet && bwRatio >= 0.0f) ? (guint)(advertisedBW * bwRatio) : advertisedBW;
-                    totalExitBW += v3BW;
+                    if(isExit) totalExitBW += v3BW;
                 }
                         
 
@@ -390,13 +410,14 @@ static void _torflowdatabase_aggregateResults(TorFlowDatabase* database) {
         g_hash_table_iter_init(&iter, database->relaysByIdentity);
         while(g_hash_table_iter_next(&iter, &key, &value)) {
             TorFlowRelay* relay = value;
+            guint oldV3BW = torflowrelay_getV3Bandwidth(relay);
+            double newV3BW = oldV3BW;
             if (torflowrelay_getIsExit(relay)) {
-                guint oldV3BW = torflowrelay_getV3Bandwidth(relay);
-                double newV3BW = torflowconfig_getOnlyMeasureExits(database->config) ?
-                                 (double) oldV3BW * totalAdvertisedBW / totalExitBW :
-                                 (double) oldV3BW * totalAdvertisedBW / totalBW;
-                torflowrelay_setV3Bandwidth(relay, (guint) newV3BW);
+                newV3BW =(double) oldV3BW * totalAdvertisedExitBW / totalExitBW;
+            } else if (!torflowconfig_getOnlyMeasureExits(database->config)) {
+                newV3BW = (double) oldV3BW * (totalAdvertisedBW - totalAdvertisedExitBW) / (totalBW-totalExitBW);
             }
+            torflowrelay_setV3Bandwidth(relay, (guint) newV3BW);
         }
     }
 
